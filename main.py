@@ -14,7 +14,7 @@ genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 DB_FILE = "custom_responses.json"
-user_states = {}  # لتتبع خطوة الإضافة
+user_states = {}
 
 def load_responses():
     if os.path.exists(DB_FILE):
@@ -32,13 +32,13 @@ def save_responses(data):
 responses = load_responses()
 
 # ---------------------------------------------------------
-# 🔘 لوحة التحكم بالأزرار (للأدمن)
+# 🔘 لوحة التحكم الرئيسية (للأدمن)
 # ---------------------------------------------------------
 
 def get_admin_keyboard():
     markup = types.InlineKeyboardMarkup()
     btn_add = types.InlineKeyboardButton("➕ إضافة رد جديد", callback_data="add_btn")
-    btn_list = types.InlineKeyboardButton("📋 عرض كل الردود", callback_data="list_btn")
+    btn_list = types.InlineKeyboardButton("📋 عرض وتعديل الردود", callback_data="list_btn")
     markup.add(btn_add, btn_list)
     return markup
 
@@ -54,91 +54,163 @@ def send_welcome(message):
         bot.reply_to(message, "مرحباً بك في منصة كورسَاتِك! كيف يمكنني مساعدتك اليوم؟ 🎓")
 
 # ---------------------------------------------------------
-# 🕹️ التفاعل مع الأزرار
+# 🕹️ التفاعل مع الأزرار القوائم والتعديل/الحذف
 # ---------------------------------------------------------
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_clicks(call):
+    global responses
+    responses = load_responses()
+
     if call.from_user.id != ADMIN_ID:
         bot.answer_callback_query(call.id, "عذراً، هذه اللوحة للأدمن فقط.")
         return
 
+    # 1. زر إضافة رد
     if call.data == "add_btn":
         user_states[call.from_user.id] = {"step": "waiting_key"}
-        bot.send_message(call.message.chat.id, "📝 ابعت دلوقتي **الكلمة أو الرسالة** اللي لما المستخدم يبعتها البوت يرُد عليها (مثلاً: كا):")
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔙 إلغاء ورجوع", callback_data="back_main"))
+        bot.edit_message_text(
+            "📝 ابعت دلوقتي **الكلمة أو الرسالة** اللي عاوز البوت يرُد عليها:", 
+            call.message.chat.id, 
+            call.message.message_id, 
+            parse_mode="Markdown",
+            reply_markup=markup
+        )
         bot.answer_callback_query(call.id)
 
+    # 2. عرض قائمة الردود كـ أزرار
     elif call.data == "list_btn":
         if not responses:
-            bot.send_message(call.message.chat.id, "📭 لا توجد ردود محفوظة حتى الآن.")
-        else:
-            msg = "📋 **الردود المحفوظة حالياً:**\n\n"
             markup = types.InlineKeyboardMarkup()
-            for k in responses.keys():
-                msg += f"• `{k}` ⬅️ {responses[k]}\n"
-                # زر حذف لكل كلمة
-                markup.add(types.InlineKeyboardButton(f"❌ حذف '{k}'", callback_data=f"del_{k}"))
-            bot.send_message(call.message.chat.id, msg, parse_mode="Markdown", reply_markup=markup)
+            markup.add(types.InlineKeyboardButton("🔙 رجوع للوحة الرئيسية", callback_data="back_main"))
+            bot.edit_message_text("📭 لا توجد ردود محفوظة حتى الآن.", call.message.chat.id, call.message.message_id, reply_markup=markup)
+        else:
+            markup = types.InlineKeyboardMarkup()
+            for key in responses.keys():
+                markup.add(types.InlineKeyboardButton(f"📌 {key}", callback_data=f"view_{key}"))
+            markup.add(types.InlineKeyboardButton("🔙 رجوع للوحة الرئيسية", callback_data="back_main"))
+            
+            bot.edit_message_text(
+                "📋 **قائمة الردود المحفوظة:**\nاضغط على أي كلمة لتعديلها أو حذفها:", 
+                call.message.chat.id, 
+                call.message.message_id, 
+                parse_mode="Markdown", 
+                reply_markup=markup
+            )
         bot.answer_callback_query(call.id)
 
+    # 3. عرض تفاصيل رد معين (تعديل / حذف / رجوع)
+    elif call.data.startswith("view_"):
+        key = call.data.replace("view_", "", 1)
+        if key in responses:
+            val = responses[key]
+            markup = types.InlineKeyboardMarkup()
+            btn_edit = types.InlineKeyboardButton("✏️ تعديل الرد", callback_data=f"edit_{key}")
+            btn_del = types.InlineKeyboardButton("🗑️ حذف الرد", callback_data=f"del_{key}")
+            btn_back = types.InlineKeyboardButton("🔙 رجوع للقائمة", callback_data="list_btn")
+            markup.add(btn_edit, btn_del)
+            markup.add(btn_back)
+
+            bot.edit_message_text(
+                f"⚙️ **تفاصيل الرد:**\n\n🔹 **الكلمة:** `{key}`\n🔹 **الرد الحالي:** `{val}`", 
+                call.message.chat.id, 
+                call.message.message_id, 
+                parse_mode="Markdown", 
+                reply_markup=markup
+            )
+        bot.answer_callback_query(call.id)
+
+    # 4. بدء تعديل الرد
+    elif call.data.startswith("edit_"):
+        key = call.data.replace("edit_", "", 1)
+        user_states[call.from_user.id] = {"step": "waiting_edit_value", "key": key}
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔙 إلغاء ورجوع", callback_data=f"view_{key}"))
+        
+        bot.edit_message_text(
+            f"✏️ اكتب **الرد الجديد** للكلمة: `{key}`", 
+            call.message.chat.id, 
+            call.message.message_id, 
+            parse_mode="Markdown", 
+            reply_markup=markup
+        )
+        bot.answer_callback_query(call.id)
+
+    # 5. حذف الرد
     elif call.data.startswith("del_"):
-        key_to_delete = call.data.replace("del_", "", 1)
-        if key_to_delete in responses:
-            del responses[key_to_delete]
+        key = call.data.replace("del_", "", 1)
+        if key in responses:
+            del responses[key]
             save_responses(responses)
-            bot.send_message(call.message.chat.id, f"🗑️ تم حذف الرد الخاص بـ: '{key_to_delete}' بنجاح!")
+            
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع للقائمة", callback_data="list_btn"))
+            bot.edit_message_text(f"🗑️ تم حذف الرد الخاص بـ `{key}` بنجاح!", call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
+        bot.answer_callback_query(call.id)
+
+    # 6. زر العودة للوحة الرئيسية
+    elif call.data == "back_main":
+        if call.from_user.id in user_states:
+            del user_states[call.from_user.id]
+        bot.edit_message_text("أهلاً بك يا أدمن! ⚙️\nاختر من الأزرار بالأسفل لإدارة ردود البوت:", call.message.chat.id, call.message.message_id, reply_markup=get_admin_keyboard())
         bot.answer_callback_query(call.id)
 
 # ---------------------------------------------------------
-# 💬 معالجة النصوص وحالة الإضافة (محادثة خطوة بخطوة)
+# 💬 معالجة تمام الرسائل العامة
 # ---------------------------------------------------------
 
 @bot.message_handler(func=lambda message: True)
 def handle_all_messages(message):
+    global responses
     user_id = message.from_user.id
     user_text = message.text.strip()
 
-    # 1. إذا كان الأدمن في مرحلة إضافة رد (خطوة بخطوة)
-    if user_id in user_states:
+    # 1. معالجة حالات الأدمن (إضافة جديدة أو تعديل)
+    if user_id == ADMIN_ID and user_id in user_states:
         state = user_states[user_id]
         
-        # الخطوة الأولى: استلام الكلمة المفتاحية
+        # إضافة كلمة جديدة
         if state["step"] == "waiting_key":
             user_states[user_id] = {"step": "waiting_value", "key": user_text}
-            bot.reply_to(message, f"تمام! الكلمة هي: **{user_text}**\n\nدلوقتي ابعت **الرد** اللي عاوز البوت يرُد بيه عليها:")
+            bot.reply_to(message, f"تمام! الكلمة هي: **{user_text}**\n\nدلوقتي ابعت **الرد** اللي عاوز البوت يرُد بيه:")
             return
 
-        # الخطوة الثانية: استلام الرد وحفظه
+        # حفظ الرد للكلمة الجديدة
         elif state["step"] == "waiting_value":
             key = state["key"]
-            value = user_text
-            responses[key] = value
+            responses[key] = user_text
             save_responses(responses)
-            
-            # إنهاء حالة الإضافة
             del user_states[user_id]
-            
-            bot.reply_to(
-                message, 
-                f"✅ **تم الحفظ بنجاح!**\n\n🔹 لما حد يبعت: `{key}`\n🔹 البوت هيرد بـ: `{value}`", 
-                parse_mode="Markdown",
-                reply_markup=get_admin_keyboard()
-            )
+            bot.reply_to(message, f"✅ **تم الحفظ بنجاح!**\n\n🔹 عند إرسال: `{key}`\n🔹 سيرد البوت بـ: `{user_text}`", parse_mode="Markdown", reply_markup=get_admin_keyboard())
             return
 
-    # 2. البحث في الردود المحفوظة
+        # حفظ الرد المعدل
+        elif state["step"] == "waiting_edit_value":
+            key = state["key"]
+            responses[key] = user_text
+            save_responses(responses)
+            del user_states[user_id]
+            bot.reply_to(message, f"✅ **تم تحديث الرد بنجاح!**\n\n🔹 الكلمة: `{key}`\n🔹 الرد الجديد: `{user_text}`", parse_mode="Markdown", reply_markup=get_admin_keyboard())
+            return
+
+    # 2. قراءة أحدث الردود
+    responses = load_responses()
+
+    # 3. البحث في الردود المحفوظة
     if user_text in responses:
         bot.reply_to(message, responses[user_text])
         return
 
-    # 3. إرسال لـ Gemini في حالة عدم وجود رد مخزن
+    # 4. إجابة Gemini للأسئلة العامة
     try:
         prompt = f"أنت مساعد منصة كورسَاتِك التعليمية. أجب باختصار على: {user_text}"
         res = model.generate_content(prompt)
         bot.reply_to(message, res.text)
     except Exception as e:
         print(f"Error: {e}")
-        bot.reply_to(message, "حدث خطأ بسيط أثناء معالجة رسالتك، حاول مرة أخرى.")
+        bot.reply_to(message, "حدث خطأ بسيط، حاول مرة أخرى.")
 
 print("Bot is running...")
 bot.infinity_polling()
