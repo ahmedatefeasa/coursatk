@@ -213,4 +213,4 @@ def handle_all_messages(message):
         bot.reply_to(message, "حدث خطأ بسيط، حاول مرة أخرى.")
 
 print("Bot is running...")
-bot.infinity_polling()
+bot.infinity_polling(skip_pending=True)
