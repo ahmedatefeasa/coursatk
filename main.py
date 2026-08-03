@@ -6,8 +6,8 @@ import google.generativeai as genai
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# ⚠️ حط هنا الـ ID بتاعك اللي جبته من userinfobot
-ADMIN_ID = 123456789  # استبدل الرقم ده برقمك الحقيقي
+# تم وضع الـ ID الخاص بك كأدمن للبوت
+ADMIN_ID = 7666190050
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 genai.configure(api_key=GEMINI_API_KEY)
@@ -18,8 +18,11 @@ DB_FILE = "custom_responses.json"
 # تحميل الردود المحفوظة
 def load_responses():
     if os.path.exists(DB_FILE):
-        with open(DB_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
     return {}
 
 # حفظ الردود الجديدة
@@ -30,7 +33,7 @@ def save_responses(data):
 responses = load_responses()
 
 # ---------------------------------------------------------
-# 🛠️ أوانم الأدمن فقط (إضافة وحذف وعرض الردود)
+# 🛠️ أوامر الأدمن (إضافة، حذف، عرض)
 # ---------------------------------------------------------
 
 # أمر إضافة رد: /add الكلمة = الرد
@@ -41,7 +44,6 @@ def add_response(message):
         return
     
     try:
-        # أخذ النص بعد كلمة /add
         text = message.text.replace("/add", "", 1).strip()
         key, value = text.split("=", 1)
         key = key.strip()
@@ -49,9 +51,9 @@ def add_response(message):
         
         responses[key] = value
         save_responses(responses)
-        bot.reply_to(message, f"✅ تم الحفظ بنجاح!\n\n**الكلمة:** {key}\n**الرد:** {value}")
+        bot.reply_to(message, f"✅ **تم حفظ الرد بنجاح!**\n\n🔹 **عند إرسال:** {key}\n🔹 **سيرد البوت بـ:** {value}", parse_mode="Markdown")
     except Exception:
-        bot.reply_to(message, "⚠️ صيغة الخاطئة! استخدم الأمر بالشكل ده:\n`/add كا = كا`\n(الكلمة = الرد)")
+        bot.reply_to(message, "⚠️ **صيغة غير صحيحة!**\nارسل الأمر بالشكل التالي:\n`/add كا = كا`", parse_mode="Markdown")
 
 # أمر حذف رد: /del الكلمة
 @bot.message_handler(commands=['del'])
@@ -65,16 +67,16 @@ def del_response(message):
         save_responses(responses)
         bot.reply_to(message, f"🗑️ تم حذف الرد الخاص بـ: '{key}'")
     else:
-        bot.reply_to(message, "❌ الكلمة دي مش موجودة أصلاً.")
+        bot.reply_to(message, "❌ هذه الكلمة غير موجودة في القائمة.")
 
-# أمر عرض كل الردود المحفوظة: /list
+# أمر عرض كل الردود: /list
 @bot.message_handler(commands=['list'])
 def list_responses(message):
     if message.from_user.id != ADMIN_ID:
         return
     
     if not responses:
-        bot.reply_to(message, "📭 مفيش أي ردود محفّظة حالياً.")
+        bot.reply_to(message, "📭 لا توجد أي ردود محفوظة حالياً.")
         return
     
     msg = "📋 **قائمة الردود المحفوظة:**\n\n"
@@ -83,7 +85,7 @@ def list_responses(message):
     bot.reply_to(message, msg, parse_mode="Markdown")
 
 # ---------------------------------------------------------
-# 💬 معالجة كافة الرسائل العامة
+# 💬 معالجة تمام الرسائل
 # ---------------------------------------------------------
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
@@ -94,14 +96,14 @@ def handle_messages(message):
         bot.reply_to(message, responses[user_text])
         return
 
-    # 2. لو مش موجودة -> يجاوب بـ Gemini
+    # 2. إذا لم تكن موجودة -> يرسلها لـ Gemini
     try:
-        prompt = f"أنت مساعد منصة كورسَاتِك. أجب باختصار على: {user_text}"
+        prompt = f"أنت مساعد منصة كورسَاتِك التعليمية. أجب باختصار ووضوح على: {user_text}"
         res = model.generate_content(prompt)
         bot.reply_to(message, res.text)
     except Exception as e:
         print(f"Error: {e}")
-        bot.reply_to(message, "حدث خطأ بسيط، حاول مرة أخرى.")
+        bot.reply_to(message, "حدث خطأ بسيط في معالجة الطلب، حاول مرة أخرى.")
 
-print("Bot starts working...")
+print("Bot is running...")
 bot.infinity_polling()
