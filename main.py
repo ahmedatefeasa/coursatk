@@ -10,8 +10,13 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 ADMIN_ID = 7666190050
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+
+# إعداد Gemini لو المفتاح موجود
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel("gemini-1.5-flash")
+else:
+    model = None
 
 DB_FILE = "custom_responses.json"
 user_states = {}
@@ -165,19 +170,20 @@ def handle_clicks(call):
 def handle_all_messages(message):
     global responses
     user_id = message.from_user.id
-    user_text = message.text.strip()
+    user_text = message.text.strip() if message.text else ""
+
+    if not user_text:
+        return
 
     # 1. معالجة حالات الأدمن (إضافة جديدة أو تعديل)
     if user_id == ADMIN_ID and user_id in user_states:
         state = user_states[user_id]
         
-        # إضافة كلمة جديدة
         if state["step"] == "waiting_key":
             user_states[user_id] = {"step": "waiting_value", "key": user_text}
             bot.reply_to(message, f"تمام! الكلمة هي: **{user_text}**\n\nدلوقتي ابعت **الرد** اللي عاوز البوت يرُد بيه:")
             return
 
-        # حفظ الرد للكلمة الجديدة
         elif state["step"] == "waiting_value":
             key = state["key"]
             responses[key] = user_text
@@ -186,7 +192,6 @@ def handle_all_messages(message):
             bot.reply_to(message, f"✅ **تم الحفظ بنجاح!**\n\n🔹 عند إرسال: `{key}`\n🔹 سيرد البوت بـ: `{user_text}`", parse_mode="Markdown", reply_markup=get_admin_keyboard())
             return
 
-        # حفظ الرد المعدل
         elif state["step"] == "waiting_edit_value":
             key = state["key"]
             responses[key] = user_text
@@ -198,19 +203,27 @@ def handle_all_messages(message):
     # 2. قراءة أحدث الردود
     responses = load_responses()
 
-    # 3. البحث في الردود المحفوظة
-    if user_text in responses:
-        bot.reply_to(message, responses[user_text])
-        return
+    # 3. البحث المرن في الردود المحفوظة (حساب المسافات وحالة الأحرف)
+    clean_user_text = user_text.lower()
+    for stored_key, stored_val in responses.items():
+        if stored_key.strip().lower() == clean_user_text:
+            bot.reply_to(message, stored_val)
+            return
 
     # 4. إجابة Gemini للأسئلة العامة
     try:
-        prompt = f"أنت مساعد منصة كورسَاتِك التعليمية. أجب باختصار على: {user_text}"
-        res = model.generate_content(prompt)
-        bot.reply_to(message, res.text)
+        if model:
+            prompt = f"أنت مساعد منصة كورسَاتِك التعليمية. أجب باختصار على: {user_text}"
+            res = model.generate_content(prompt)
+            if res.text:
+                bot.reply_to(message, res.text)
+            else:
+                bot.reply_to(message, "مرحباً بك في كورسَاتِك! كيف يمكنني مساعدتك؟")
+        else:
+            bot.reply_to(message, "مرحباً بك في منصة كورسَاتِك! 🎓")
     except Exception as e:
-        print(f"Error: {e}")
-        bot.reply_to(message, "حدث خطأ بسيط، حاول مرة أخرى.")
+        print(f"Gemini Error: {e}")
+        bot.reply_to(message, "مرحباً بك في منصة كورسَاتِك! كيف يمكنني مساعدتك اليوم؟ 🎓")
 
 print("Bot is running...")
 bot.infinity_polling(skip_pending=True)
