@@ -1,6 +1,7 @@
 import os
 import json
 import telebot
+from telebot import types
 
 # التوكن الخاص ببوتك ومعرف حسابك الشخصي
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -8,10 +9,9 @@ ADMIN_ID = 7666190050  # معرف حسابك الشخصي كـ أدمن
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-# مهم: لو مفعّل عندك Volume في Railway، خلي المسار جوه الـ Volume
-# عشان الردود متضيعش مع كل Deploy أو Restart
-# مثال: DB_FILE = "/app/data/responses.json"
+# لازم يكون فيه Volume متربط ومعمول له Mount Path = /app/data
 DB_FILE = "/app/data/responses.json"
+
 
 # دالة تحميل الردود المخزنة
 def load_responses():
@@ -32,93 +32,139 @@ def save_responses(data):
 
 responses = load_responses()
 
-# ----------------- 1. لوحة تحكم الأدمن (في شات البوت) -----------------
+
+# ----------------- القائمة الرئيسية بالأزرار -----------------
+
+def main_menu():
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("➕ إضافة رد جديد", callback_data="add"),
+        types.InlineKeyboardButton("🗑️ حذف رد", callback_data="delete_menu"),
+        types.InlineKeyboardButton("📋 عرض كل الردود", callback_data="list"),
+    )
+    return markup
+
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     if message.from_user.id == ADMIN_ID:
-        msg = (
-            "⚙️ **لوحة التحكم في الردود التلقائية (Business Bot)**\n\n"
-            "📌 **لإضافة رد جديد أرسل:**\n"
-            "`إضافة: الكلمة المفتاحية = الرد المطلوب`\n\n"
-            "💡 **مثال:**\n"
-            "`إضافة: كورس بايثون = تفضل التفاصيل ورابط التسجيل: https://example.com`\n\n"
-            "❌ **لحذف رد أرسل:**\n"
-            "`حذف: الكلمة المفتاحية`\n\n"
-            "📋 **لعرض جميع الردود اكتب:** `عرض الردود`"
+        bot.send_message(
+            message.chat.id,
+            "⚙️ **لوحة التحكم في الردود التلقائية**\n\nاختار من الأزرار تحت:",
+            parse_mode="Markdown",
+            reply_markup=main_menu()
         )
-        bot.reply_to(message, msg, parse_mode="Markdown")
     else:
         bot.reply_to(message, "مرحباً بك! هذا البوت مخصص لإدارة الردود التلقائية.")
 
 
-# إضافة رد جديد
-@bot.message_handler(func=lambda m: m.from_user.id == ADMIN_ID and m.text and m.text.startswith("إضافة:"))
-def add_response(message):
+# ----------------- التعامل مع ضغط الأزرار -----------------
+
+@bot.callback_query_handler(func=lambda call: call.from_user.id == ADMIN_ID)
+def handle_callback(call):
     global responses
-    try:
-        content = message.text.replace("إضافة:", "").strip()
-        key, value = content.split("=", 1)
-        key = key.strip().lower()
-        value = value.strip()
 
-        responses[key] = value
-        save_responses(responses)
-        bot.reply_to(
-            message,
-            f"✅ **تم حفظ الرد بنجاح!**\n\n🔑 **الكلمة:** `{key}`\n💬 **الرد:** {value}",
-            parse_mode="Markdown"
+    if call.data == "add":
+        msg = bot.send_message(call.message.chat.id, "✏️ ابعتلي الكلمة المفتاحية اللي عاوز تضيفها:")
+        bot.register_next_step_handler(msg, process_add_key)
+        bot.answer_callback_query(call.id)
+
+    elif call.data == "list":
+        responses = load_responses()
+        if not responses:
+            bot.send_message(call.message.chat.id, "📭 لا توجد ردود مخزنة حالياً.", reply_markup=main_menu())
+        else:
+            text = "📋 **الردود المخزنة حالياً:**\n\n"
+            for k, v in responses.items():
+                text += f"🔹 `{k}` 💬 {v}\n"
+            bot.send_message(call.message.chat.id, text, parse_mode="Markdown", reply_markup=main_menu())
+        bot.answer_callback_query(call.id)
+
+    elif call.data == "delete_menu":
+        responses = load_responses()
+        if not responses:
+            bot.send_message(call.message.chat.id, "📭 لا توجد ردود لحذفها.", reply_markup=main_menu())
+        else:
+            markup = types.InlineKeyboardMarkup(row_width=1)
+            for k in responses.keys():
+                markup.add(types.InlineKeyboardButton(f"🗑️ {k}", callback_data=f"del:{k}"))
+            markup.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back"))
+            bot.send_message(call.message.chat.id, "اختار الرد اللي عاوز تحذفه:", reply_markup=markup)
+        bot.answer_callback_query(call.id)
+
+    elif call.data.startswith("del:"):
+        key = call.data.replace("del:", "", 1)
+        responses = load_responses()
+        if key in responses:
+            del responses[key]
+            save_responses(responses)
+            bot.send_message(
+                call.message.chat.id,
+                f"✅ تم حذف `{key}` بنجاح.",
+                parse_mode="Markdown",
+                reply_markup=main_menu()
+            )
+        else:
+            bot.send_message(call.message.chat.id, "⚠️ الرد ده اتحذف قبل كدة.", reply_markup=main_menu())
+        bot.answer_callback_query(call.id)
+
+    elif call.data == "back":
+        bot.send_message(
+            call.message.chat.id,
+            "⚙️ **لوحة التحكم**",
+            parse_mode="Markdown",
+            reply_markup=main_menu()
         )
-    except Exception:
-        bot.reply_to(
-            message,
-            "❌ **صيغة خاطئة!** استخدم الشكل التالي:\n`إضافة: الكلمة = الرد المطلوب`",
-            parse_mode="Markdown"
-        )
+        bot.answer_callback_query(call.id)
 
 
-# حذف رد
-@bot.message_handler(func=lambda m: m.from_user.id == ADMIN_ID and m.text and m.text.startswith("حذف:"))
-def delete_response(message):
-    global responses
-    key = message.text.replace("حذف:", "").strip().lower()
-    if key in responses:
-        del responses[key]
-        save_responses(responses)
-        bot.reply_to(message, f"🗑️ تم حذف الرد الخاص بـ `{key}` بنجاح.", parse_mode="Markdown")
-    else:
-        bot.reply_to(message, f"⚠️ الكلمة `{key}` غير موجودة في القائمة.", parse_mode="Markdown")
-
-
-# عرض الردود
-@bot.message_handler(func=lambda m: m.from_user.id == ADMIN_ID and m.text == "عرض الردود")
-def list_responses(message):
-    current = load_responses()
-    if not current:
-        bot.reply_to(message, "📭 لا توجد ردود مخزنة حالياً.")
+def process_add_key(message):
+    if message.from_user.id != ADMIN_ID:
         return
+    key = message.text.strip().lower()
+    msg = bot.send_message(
+        message.chat.id,
+        f"تمام، دلوقتي ابعتلي الرد اللي هيتبعت لما حد يكتب: `{key}`",
+        parse_mode="Markdown"
+    )
+    bot.register_next_step_handler(msg, process_add_value, key)
 
-    text = "📋 **الردود المخزنة حالياً:**\n\n"
-    for k, v in current.items():
-        text += f"🔹 `{k}` 💬 {v}\n"
-    bot.reply_to(message, text, parse_mode="Markdown")
+
+def process_add_value(message, key):
+    if message.from_user.id != ADMIN_ID:
+        return
+    global responses
+    value = message.text.strip()
+    responses = load_responses()
+    responses[key] = value
+    save_responses(responses)
+    bot.send_message(
+        message.chat.id,
+        f"✅ **تم الحفظ بنجاح!**\n\n🔑 الكلمة: `{key}`\n💬 الرد: {value}",
+        parse_mode="Markdown",
+        reply_markup=main_menu()
+    )
 
 
-# ----------------- 2. الرد التلقائي في محادثات الأعمال (شاتك الشخصي) -----------------
+# ----------------- الرد التلقائي في محادثات الأعمال -----------------
 
 @bot.business_message_handler(func=lambda message: True)
 def handle_business_message(business_message):
     try:
         global responses
-        responses = load_responses()
 
+        # مهم: تجاهل أي رسالة مبعوتة منك انت (صاحب الحساب) نفسك
+        # عشان البوت ميردش عليك وانت بترد يدوي على العميل
+        if business_message.from_user.id == ADMIN_ID:
+            return
+
+        responses = load_responses()
         user_text = business_message.text
         if not user_text:
             return
 
         clean_text = user_text.strip().lower()
 
-        # فحص الكلمات المفتاحية والرد بالنيابة عنك
         for key, val in responses.items():
             if key in clean_text:
                 bot.send_message(
@@ -134,9 +180,6 @@ def handle_business_message(business_message):
 # ----------------- التشغيل -----------------
 
 if __name__ == "__main__":
-    # مهم جداً: بيمسح أي Webhook قديم متسجل على التوكن
-    # عشان يمنع تعارض 409 مع الـ polling
     bot.remove_webhook()
-
     print("🚀 Coursatk Business Bot is online & running...")
     bot.infinity_polling()
