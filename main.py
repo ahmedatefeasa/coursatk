@@ -11,8 +11,7 @@ bot = telebot.TeleBot(TELEGRAM_TOKEN)
 # مهم: لو مفعّل عندك Volume في Railway، خلي المسار جوه الـ Volume
 # عشان الردود متضيعش مع كل Deploy أو Restart
 # مثال: DB_FILE = "/app/data/responses.json"
-DB_FILE = "responses.json"
-
+DB_FILE = "/app/data/responses.json"
 
 # دالة تحميل الردود المخزنة
 def load_responses():
