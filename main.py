@@ -39,6 +39,7 @@ def main_menu():
     markup = types.InlineKeyboardMarkup(row_width=1)
     markup.add(
         types.InlineKeyboardButton("➕ إضافة رد جديد", callback_data="add"),
+        types.InlineKeyboardButton("✏️ تعديل رد", callback_data="edit_menu"),
         types.InlineKeyboardButton("🗑️ حذف رد", callback_data="delete_menu"),
         types.InlineKeyboardButton("📋 عرض كل الردود", callback_data="list"),
     )
@@ -78,6 +79,32 @@ def handle_callback(call):
             for k, v in responses.items():
                 text += f"🔹 `{k}` 💬 {v}\n"
             bot.send_message(call.message.chat.id, text, parse_mode="Markdown", reply_markup=main_menu())
+        bot.answer_callback_query(call.id)
+
+    elif call.data == "edit_menu":
+        responses = load_responses()
+        if not responses:
+            bot.send_message(call.message.chat.id, "📭 لا توجد ردود لتعديلها.", reply_markup=main_menu())
+        else:
+            markup = types.InlineKeyboardMarkup(row_width=1)
+            for k in responses.keys():
+                markup.add(types.InlineKeyboardButton(f"✏️ {k}", callback_data=f"edit:{k}"))
+            markup.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back"))
+            bot.send_message(call.message.chat.id, "اختار الرد اللي عاوز تعدله:", reply_markup=markup)
+        bot.answer_callback_query(call.id)
+
+    elif call.data.startswith("edit:"):
+        key = call.data.replace("edit:", "", 1)
+        responses = load_responses()
+        if key not in responses:
+            bot.send_message(call.message.chat.id, "⚠️ الرد ده مش موجود.", reply_markup=main_menu())
+        else:
+            msg = bot.send_message(
+                call.message.chat.id,
+                f"✏️ الرد الحالي لـ `{key}` هو:\n{responses[key]}\n\nابعتلي الرد الجديد:",
+                parse_mode="Markdown"
+            )
+            bot.register_next_step_handler(msg, process_edit_value, key)
         bot.answer_callback_query(call.id)
 
     elif call.data == "delete_menu":
@@ -141,6 +168,22 @@ def process_add_value(message, key):
     bot.send_message(
         message.chat.id,
         f"✅ **تم الحفظ بنجاح!**\n\n🔑 الكلمة: `{key}`\n💬 الرد: {value}",
+        parse_mode="Markdown",
+        reply_markup=main_menu()
+    )
+
+
+def process_edit_value(message, key):
+    if message.from_user.id != ADMIN_ID:
+        return
+    global responses
+    value = message.text.strip()
+    responses = load_responses()
+    responses[key] = value
+    save_responses(responses)
+    bot.send_message(
+        message.chat.id,
+        f"✅ **تم تعديل الرد بنجاح!**\n\n🔑 الكلمة: `{key}`\n💬 الرد الجديد: {value}",
         parse_mode="Markdown",
         reply_markup=main_menu()
     )
